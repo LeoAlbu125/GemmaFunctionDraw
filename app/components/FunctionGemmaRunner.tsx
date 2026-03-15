@@ -26,6 +26,7 @@ export function useFunctionGemma(drawingRef: React.RefObject<DrawingBoardHandle 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const tokenizerRef = useRef<unknown>(null);
   const modelRef = useRef<unknown>(null);
+  const cacheInitializedRef = useRef(false);
 
   const loadModel = useCallback(async () => {
     if (tokenizerRef.current && modelRef.current) {
@@ -40,9 +41,13 @@ export function useFunctionGemma(drawingRef: React.RefObject<DrawingBoardHandle 
       const transformers = await import("@huggingface/transformers");
       const { AutoModelForCausalLM, AutoTokenizer, env } = transformers;
 
-      // Use IndexedDB cache so downloads persist across sessions; next load continues from cache
-      env.useCustomCache = true;
-      env.customCache = await createIndexedDBCache();
+      // Use IndexedDB cache so downloads persist across sessions; next load continues from cache.
+      // Initialize this once per tab to avoid recreating the cache on every load.
+      if (!cacheInitializedRef.current) {
+        env.useCustomCache = true;
+        env.customCache = await createIndexedDBCache();
+        cacheInitializedRef.current = true;
+      }
 
       const tokenizerProgressCallback = (data: { status: string; file?: string; progress?: number; loaded?: number; total?: number }) => {
         if (data.status === "progress" && typeof data.progress === "number") {
