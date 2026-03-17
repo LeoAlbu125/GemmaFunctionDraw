@@ -5,6 +5,30 @@ export const DRAW_TOOL_SCHEMA = [
   {
     type: "function",
     function: {
+      name: "add",
+      description:
+        "High level draw command. Use the direction and distance arguments to move the pen.",
+      parameters: {
+        type: "object",
+        properties: {
+          direction: {
+            type: "string",
+            description:
+              "Direction to draw: one of 'up', 'down', 'left', 'right'.",
+          },
+          distance: {
+            type: "number",
+            description:
+              "Distance in pixels to move in the given direction. Default is 20.",
+          },
+        },
+        required: ["direction"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "draw_up",
       description: "Move the pen up by a given distance (in pixels), drawing a line if the pen is down.",
       parameters: {
@@ -72,39 +96,32 @@ export const DRAW_TOOL_SCHEMA = [
   },
 ];
 
-const START_TAG = "<start_function_call>";
-const END_TAG = "<end_function_call>";
 const ESCAPE_OPEN = "<escape>";
 const ESCAPE_CLOSE = "</escape>";
 
 export type ParsedCall = {
-  name: "draw_up" | "draw_down" | "draw_left" | "draw_right";
-  args: { distance?: number };
+  name: string;
+  args: { distance?: number; direction?: string };
 };
 
 /**
  * Parse FunctionGemma output for a single function call.
- * Format: <start_function_call>call:functionName{key:value...}<end_function_call>
+ * Looks for `call:functionName{key:value...}` anywhere in the string.
  * String values may be wrapped in <escape>...</escape>.
  */
 export function parseFunctionCall(decoded: string): ParsedCall | null {
-  const startIndex = decoded.indexOf(START_TAG);
-  const endIndex = decoded.indexOf(END_TAG);
-  if (startIndex === -1 || endIndex === -1) return null;
+  const callIndex = decoded.indexOf("call:");
+  if (callIndex === -1) return null;
 
-  let callStr = decoded.substring(
-    startIndex + START_TAG.length,
-    endIndex
-  ).trim();
+  const braceStart = decoded.indexOf("{", callIndex);
+  const braceEnd = decoded.indexOf("}", braceStart);
+  if (braceStart === -1 || braceEnd === -1) return null;
 
-  if (!callStr.startsWith("call:")) return null;
+  const namePart = decoded
+    .substring(callIndex + "call:".length, braceStart)
+    .trim();
 
-  const braceStart = callStr.indexOf("{");
-  const namePart = callStr.substring(0, braceStart).replace("call:", "").trim();
-  const validNames = ["draw_up", "draw_down", "draw_left", "draw_right"];
-  if (!validNames.includes(namePart)) return null;
-
-  let argsStr = braceStart >= 0 ? callStr.substring(braceStart) : "{}";
+  let argsStr = decoded.substring(braceStart, braceEnd + 1);
   // Replace <escape>...</escape> with quoted string for JSON
   argsStr = argsStr.replace(
     new RegExp(`${ESCAPE_OPEN}(.*?)${ESCAPE_CLOSE}`, "gs"),
@@ -113,15 +130,15 @@ export function parseFunctionCall(decoded: string): ParsedCall | null {
   // Quote unquoted keys for JSON: key: -> "key":
   argsStr = argsStr.replace(/(\w+):/g, '"$1":');
 
-  let args: { distance?: number } = {};
+  let args: { distance?: number; direction?: string } = {};
   try {
-    args = JSON.parse(argsStr) as { distance?: number };
+    args = JSON.parse(argsStr) as { distance?: number; direction?: string };
   } catch {
-    return { name: namePart as ParsedCall["name"], args: {} };
+    return { name: namePart, args: {} };
   }
 
   return {
-    name: namePart as ParsedCall["name"],
+    name: namePart,
     args: typeof args.distance === "number" ? { distance: args.distance } : {},
   };
 }

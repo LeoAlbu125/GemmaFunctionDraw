@@ -66,7 +66,7 @@ export function useFunctionGemma(drawingRef: React.RefObject<DrawingBoardHandle 
         }
       };
       const model = await AutoModelForCausalLM.from_pretrained(MODEL_ID, {
-        device: "webgpu",
+        device: "wasm",
         dtype: "q4",
         progress_callback: modelProgressCallback,
       });
@@ -114,13 +114,26 @@ export function useFunctionGemma(drawingRef: React.RefObject<DrawingBoardHandle 
 
         const output = await model.generate({
           ...inputs,
-          max_new_tokens: 128,
+          max_new_tokens: 32,
           do_sample: false,
         });
 
-        const decoded = tokenizer.decode(output as unknown, {
-          skip_special_tokens: false,
-        });
+        const outAny = output as any;
+        let decoded = "";
+        try {
+          const inputLen = inputs.input_ids.dims[1];
+          const generated =
+            outAny && typeof outAny.slice === "function"
+              ? outAny.slice(0, [inputLen, null])
+              : outAny;
+          decoded = tokenizer.decode(generated, {
+            skip_special_tokens: false,
+          });
+        } catch {
+          decoded = tokenizer.decode(output as unknown, {
+            skip_special_tokens: false,
+          });
+        }
 
         const parsed = parseFunctionCall(decoded);
         if (!parsed) {
@@ -132,19 +145,55 @@ export function useFunctionGemma(drawingRef: React.RefObject<DrawingBoardHandle 
         }
 
         const distance = parsed.args.distance ?? 20;
-        switch (parsed.name) {
-          case "draw_up":
-            api.drawUp(distance);
-            break;
-          case "draw_down":
-            api.drawDown(distance);
-            break;
-          case "draw_left":
-            api.drawLeft(distance);
-            break;
-          case "draw_right":
-            api.drawRight(distance);
-            break;
+        if (parsed.name === "add") {
+          const dir = (parsed.args.direction || "").toLowerCase();
+          switch (dir) {
+            case "up":
+              api.drawUp(distance);
+              break;
+            case "down":
+              api.drawDown(distance);
+              break;
+            case "left":
+              api.drawLeft(distance);
+              break;
+            case "right":
+              api.drawRight(distance);
+              break;
+            default:
+              setErrorMessage(
+                `Model returned add() with unknown direction '${parsed.args.direction}'. Raw: ${decoded.slice(
+                  0,
+                  200
+                )}`
+              );
+              setStatus("ready");
+              return;
+          }
+        } else {
+          switch (parsed.name) {
+            case "draw_up":
+              api.drawUp(distance);
+              break;
+            case "draw_down":
+              api.drawDown(distance);
+              break;
+            case "draw_left":
+              api.drawLeft(distance);
+              break;
+            case "draw_right":
+              api.drawRight(distance);
+              break;
+            default:
+              setErrorMessage(
+                `Model returned unsupported function '${parsed.name}'. Raw: ${decoded.slice(
+                  0,
+                  200
+                )}`
+              );
+              setStatus("ready");
+              return;
+          }
         }
         setStatus("ready");
       } catch (e) {
